@@ -1,2 +1,2 @@
 # Convolutional Neural Network For Computer Vision
-Stanford CS231N assignments and notes (http://cs231n.github.io/)
+Stanford CS231N assignments and notes
