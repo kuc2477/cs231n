@@ -1,2 +1,2 @@
-# cs231n-stanford
-stanford cs231n assignments (http://cs231n.github.io/)
+# cs231n-stanford (Convolutional Network For Computer Vision)
+Stanford cs231n assignments and notes (http://cs231n.github.io/)
