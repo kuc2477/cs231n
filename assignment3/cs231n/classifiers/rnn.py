@@ -135,7 +135,50 @@ class CaptioningRNN(object):
     # defined above to store loss and gradients; grads[k] should give the      #
     # gradients for self.params[k].                                            #
     ############################################################################
-    pass
+    cache = {}
+
+    # ============
+    # Forward Pass
+    # ============
+
+    # Features -> Initial Hidden State
+    h0 = features.dot(W_proj) + b_proj
+
+    # Word indices -> Word vectors
+    captions_vec_in, cache['captions_vec_in'] = \
+        word_embedding_forward(captions_in, W_embed)
+    captions_vec_out, cache['captions_vec_out'] = \
+        word_embedding_forward(captions_out, W_embed)
+
+    # Initial Hidden State + Captions Input -> Hidden States
+    h, cache['h'] = rnn_forward(captions_vec_in, h0, Wx, Wh, b)
+
+    # Hidden States -> Vocabulary Scores
+    scores, cache['scores'] = temporal_affine_forward(h, W_vocab, b_vocab)
+
+    # Vocabulary Scores -> Loss and Gradient on scores
+    loss, dscores = temporal_softmax_loss(scores, captions_out, mask)
+
+    # ================
+    # Backpropagations
+    # ================
+
+    # Backpropagation - FC
+    dh, grads['W_vocab'], grads['b_vocab'] = \
+        temporal_affine_backward(dscores, cache['scores'])
+
+    # Backpropagation - RNN
+    dcaptions_vec_in, dh0, grads['Wx'], grads['Wh'], grads['b'] = \
+        rnn_backward(dh, cache['h'])
+
+    # Backpropagation - Word Embedding
+    grads['W_embed'] = \
+        word_embedding_backward(dcaptions_vec_in, cache['captions_vec_in'])
+
+    # Backpropagation - FC
+    grads['W_proj'] = features.T.dot(dh0)
+    grads['b_proj'] = np.sum(dh0, axis=0)
+
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -197,7 +240,27 @@ class CaptioningRNN(object):
     # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
     # a loop.                                                                 #
     ###########################################################################
-    pass
+
+    # Features -> Initial Hidden State
+    h_t = features.dot(W_proj) + b_proj
+    x_t = self._start * np.ones((N, 1), dtype=np.int32)
+    for t in xrange(max_length):
+        # Word index -> Word Vector
+        word_embedded, _ = word_embedding_forward(x_t, W_embed)
+        word_embedded = np.squeeze(word_embedded)
+
+        # Previous Hidden State + Word Vector -> New Hidden State
+        h_t, _ = rnn_step_forward(word_embedded, h_t, Wx, Wh, b)
+
+        # Hidden State -> Vocabulary Scores
+        scores, _ = temporal_affine_forward(
+            h_t[:, np.newaxis, :], W_vocab, b_vocab
+        )
+        scores = scores.squeeze()
+
+        # Vocabulary Scores -> Vocabulary Index
+        x_t = np.argmax(scores, axis=1).reshape(-1, 1)
+        captions[:, t] = x_t.squeeze()
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
