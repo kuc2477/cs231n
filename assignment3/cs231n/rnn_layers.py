@@ -305,11 +305,34 @@ def lstm_step_forward(x, prev_h, prev_c, Wx, Wh, b):
   - cache: Tuple of values needed for backward pass.
   """
   next_h, next_c, cache = None, None, None
+
+  N, D = x.shape
+  _, H = prev_h.shape
+
   #############################################################################
   # TODO: Implement the forward pass for a single timestep of an LSTM.        #
   # You may want to use the numerically stable sigmoid implementation above.  #
   #############################################################################
-  pass
+  xh = x.dot(Wx)
+  hh = prev_h.dot(Wh)
+  score = xh + hh + b
+  score_i, score_f, score_o, score_g = \
+      score[:, :H], score[:, H:2*H], \
+      score[:, 2*H:3*H], score[:, 3*H:4*H]
+
+  i = sigmoid(score_i)
+  f = sigmoid(score_f)
+  o = sigmoid(score_o)
+  g = np.tanh(score_g)
+
+  next_c = f * prev_c + i * g
+  next_h = o * np.tanh(next_c)
+  cache = (
+      x, prev_c, prev_h, Wx, Wh, b, xh, hh, 
+      score, score_i, score_f, score_o, score_g,
+      i, f, o, g,
+      next_c, next_h,
+  )
   ##############################################################################
   #                               END OF YOUR CODE                             #
   ##############################################################################
@@ -334,14 +357,139 @@ def lstm_step_backward(dnext_h, dnext_c, cache):
   - dWh: Gradient of hidden-to-hidden weights, of shape (H, 4H)
   - db: Gradient of biases, of shape (4H,)
   """
-  dx, dh, dc, dWx, dWh, db = None, None, None, None, None, None
+  dx, dprev_h, dprev_c, dWx, dWh, db = None, None, None, None, None, None
+
+  # unpack the cache
+  (x, prev_c, prev_h, Wx, Wh, b, xh, hh, 
+   score, score_i, score_f, score_o, score_g, 
+   i, f, o, g, next_c, next_h) = cache
+
+  # set spatial parameters
+  N, D = x.shape
+  _, H = prev_c.shape
+
+  # set gradients into appropriate dimensions of zeros to backprop in
+  # accumulative way.
+  dx = np.zeros_like(x)
+  dprev_h = np.zeros_like(prev_h)
+  dprev_c = np.zeros_like(prev_c)
+  dWx = np.zeros_like(Wx)
+  dWh = np.zeros_like(Wh)
+  db = np.zeros_like(b)
+
   #############################################################################
   # TODO: Implement the backward pass for a single timestep of an LSTM.       #
   #                                                                           #
   # HINT: For sigmoid and tanh you can compute local derivatives in terms of  #
   # the output value from the nonlinearity.                                   #
   #############################################################################
-  pass
+
+  # dnext_h
+  dnext_h_do = np.tanh(next_c)
+  dnext_h_dnext_c = o * (1 - np.tanh(next_c) ** 2)
+
+  # dnext_c
+  dnext_c_df = prev_c
+  dnext_c_dprev_c = f
+  dnext_c_di = g
+  dnext_c_dg = i
+
+  # dscore
+  dscore_dx = dxh_dx
+  dscore_dWx = x.T
+  dscore_dWh = prev_h.T
+  dscore_dprev_h = Wh
+  dscore_db = 1
+
+  # di, df, do, dg
+  di_dscore_i = i * (1 - i)
+  df_dscore_f = f * (1 - f)
+  do_dscore_o = o * (1 - o)
+  dg_dscore_g = 1 - g ** 2
+
+  # di, df, do, dg
+  di_dscore = np.zeros_like(score)
+  df_dscore = np.zeros_like(score)
+  do_dscore = np.zeros_like(score)
+  dg_dscore = np.zeros_like(score)
+  di_dscore[:, :H] = di_dscore_i
+  df_dscore[:, H:2*H] = df_dscore_f
+  do_dscore[:, 2*H:3*H] = do_dscore_o
+  dg_dscore[:, 3*H:4*H] = dg_dscore_g
+
+  # di
+  di_dx = di_dscore * dscore_dx
+  di_dWx = di_dscore * dscore_dWx
+  di_dWh = di_dscore * dscore_dWh
+  di_dprev_h = di_dscore * dscore_dprev_h
+  di_db = di_dscore * db
+
+  # df
+  df_dx = df_dscore * dscore_dx
+  df_dWx = df_dscore * dscore_dWx
+  df_dWh = df_dscore * dscore_dWh
+  df_dprev_h = df_dscore * dscore_dprev_h
+  df_db = df_dscore * db
+
+  # do
+  do_dx = do_dscore * dscore_dx
+  do_dWx = do_dscore * dscore_dWx
+  do_dWh = do_dscore * dscore_dWh
+  do_dprev_h = do_dscore * dscore_dprev_h
+  do_db = do_dscore * db
+
+  # dg
+  dg_dx = dg_dscore * dscore_dx
+  dg_dWx = dg_dscore * dscore_dWx
+  dg_dWh = dg_dscore * dscore_dWh
+  dg_dprev_h = dg_dscore * dscore_dprev_h
+  dg_db = dg_dscore * db
+
+  # compute gradients over next_c
+  dnext_c_dx = dnext_c_df * df_dx + dnext_c_di * di_dx + dnext_c_dg * dg_dx
+  dnext_c_dprev_h = (
+      dnext_c_df * df_dprev_h + 
+      dnext_c_di * di_dprev_h + 
+      dnext_c_dg * dg_dprev_h
+  )
+  dnext_c_dWx = (
+      dnext_c_df * df_dWx + 
+      dnext_c_di * di_dWx + 
+      dnext_c_dg * dg_dWx
+  )
+  dnext_c_dWh = (
+      dnext_c_df * df_dWh +
+      dnext_c_di * di_dWh +
+      dnext_c_dg * dg_dWh
+  )
+  dnext_c_db = (
+      dnext_c_df * df_db +
+      dnext_c_di * di_db +
+      dnext_c_dg * dg_db
+  )
+
+  # compute gradients over next_h
+  dnext_h_dx = dnext_h_do * do_dx
+  dnext_h_dprev_h = dnext_h_do * do_dprev_h
+  dnext_h_dprev_c = dnext_h_dnext_c * dnext_c_dprev_c
+  dnext_h_dWx = dnext_h_do * do_dWx
+  dnext_h_dWh = dnext_h_do * do_dWh
+  dnext_h_db = dnext_h_do * do_db
+  dnext_h_dx += dnext_h_dnext_c * dnext_c_dx
+  dnext_h_dprev_h += dnext_h_dnext_c * dnext_c_dprev_h
+  dnext_h_dWx += dnext_h_dnext_c * dnext_c_dWx
+  dnext_h_dWh += dnext_h_dnext_c * dnext_c_dWh
+  dnext_h_db = dnext_h_dnext_c * dnext_c_db
+
+  # compute final gradients
+  dx = dnext_c * dnext_c_dx + dnext_h * dnext_h_dx
+  dprev_c = dnext_c * dnext_c_dprev_c + dnext_h * dnext_h_dprev_c
+  dprev_h = dnext_c * dnext_c_dprev_h + dnext_h * dnext_h_dprev_h
+  dWx = dnext_c * dnext_c_dWx + dnext_h * dnext_h_dWx
+  dWh = dnext_c * dnext_c_dWh + dnext_h * dnext_h_dWh
+  db = dnext_c * dnext_c_db + dnext_h * dnext_h_db
+
+
   ##############################################################################
   #                               END OF YOUR CODE                             #
   ##############################################################################
