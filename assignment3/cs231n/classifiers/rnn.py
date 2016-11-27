@@ -244,7 +244,8 @@ class CaptioningRNN(object):
     # Features -> Initial Hidden State
     h_t = features.dot(W_proj) + b_proj
     x_t = self._start * np.ones((N, 1), dtype=np.int32)
-    for t in xrange(max_length):
+    captions[:, 0] = self._start
+    for t in xrange(1, max_length):
         # Word index -> Word Vector
         word_embedded, _ = word_embedding_forward(x_t, W_embed)
         word_embedded = np.squeeze(word_embedded)
