@@ -185,7 +185,7 @@ def rnn_backward(dh, cache):
   for t in reversed(xrange(T)):
       # Prepare dh, x, h, h_prev and cache of step t. Note that h's actual 
       # gradient dh is sum of given upstream gradient and gradient from 
-      # next step.
+      # a step further.
       dh_t = dh[:, t, :] + dh_t_prev
       x_t = x[:, t, :]
       h_t = h[:, t, :]
@@ -383,113 +383,34 @@ def lstm_step_backward(dnext_h, dnext_c, cache):
   # HINT: For sigmoid and tanh you can compute local derivatives in terms of  #
   # the output value from the nonlinearity.                                   #
   #############################################################################
+  do = dnext_h * np.tanh(next_c)
+  dtanh_next_c = dnext_h * o
 
-  # dnext_h
-  dnext_h_do = np.tanh(next_c)
-  dnext_h_dnext_c = o * (1 - np.tanh(next_c) ** 2)
+  dnext_c = dnext_c + dtanh_next_c * (1 - np.tanh(next_c) ** 2)
+  dscore_o = do * o * (1 - o)
+  dscore = np.zeros_like(score)
+  dscore[:, 2*H:3*H] = dscore_o
 
-  # dnext_c
-  dnext_c_df = prev_c
-  dnext_c_dprev_c = f
-  dnext_c_di = g
-  dnext_c_dg = i
+  df = dnext_c * prev_c
+  dprev_c = dnext_c * f
+  di = dnext_c * g
+  dg = dnext_c * i
 
-  # dscore
-  dscore_dx = dxh_dx
-  dscore_dWx = x.T
-  dscore_dWh = prev_h.T
-  dscore_dprev_h = Wh
-  dscore_db = 1
+  dscore_f = df * f * (1 - f)
+  dscore[:, H:2*H] = dscore_f
+  dscore_i = di * i * (1 - i)
+  dscore[:, :H] = dscore_i
+  dscore_g = dg * (1 - np.tanh(score_g) ** 2)
+  dscore[:, 3*H:4*H] = dscore_g
 
-  # di, df, do, dg
-  di_dscore_i = i * (1 - i)
-  df_dscore_f = f * (1 - f)
-  do_dscore_o = o * (1 - o)
-  dg_dscore_g = 1 - g ** 2
+  dxh = dscore
+  dhh = dscore
+  db = np.sum(dscore, axis=0)
 
-  # di, df, do, dg
-  di_dscore = np.zeros_like(score)
-  df_dscore = np.zeros_like(score)
-  do_dscore = np.zeros_like(score)
-  dg_dscore = np.zeros_like(score)
-  di_dscore[:, :H] = di_dscore_i
-  df_dscore[:, H:2*H] = df_dscore_f
-  do_dscore[:, 2*H:3*H] = do_dscore_o
-  dg_dscore[:, 3*H:4*H] = dg_dscore_g
-
-  # di
-  di_dx = di_dscore * dscore_dx
-  di_dWx = di_dscore * dscore_dWx
-  di_dWh = di_dscore * dscore_dWh
-  di_dprev_h = di_dscore * dscore_dprev_h
-  di_db = di_dscore * db
-
-  # df
-  df_dx = df_dscore * dscore_dx
-  df_dWx = df_dscore * dscore_dWx
-  df_dWh = df_dscore * dscore_dWh
-  df_dprev_h = df_dscore * dscore_dprev_h
-  df_db = df_dscore * db
-
-  # do
-  do_dx = do_dscore * dscore_dx
-  do_dWx = do_dscore * dscore_dWx
-  do_dWh = do_dscore * dscore_dWh
-  do_dprev_h = do_dscore * dscore_dprev_h
-  do_db = do_dscore * db
-
-  # dg
-  dg_dx = dg_dscore * dscore_dx
-  dg_dWx = dg_dscore * dscore_dWx
-  dg_dWh = dg_dscore * dscore_dWh
-  dg_dprev_h = dg_dscore * dscore_dprev_h
-  dg_db = dg_dscore * db
-
-  # compute gradients over next_c
-  dnext_c_dx = dnext_c_df * df_dx + dnext_c_di * di_dx + dnext_c_dg * dg_dx
-  dnext_c_dprev_h = (
-      dnext_c_df * df_dprev_h + 
-      dnext_c_di * di_dprev_h + 
-      dnext_c_dg * dg_dprev_h
-  )
-  dnext_c_dWx = (
-      dnext_c_df * df_dWx + 
-      dnext_c_di * di_dWx + 
-      dnext_c_dg * dg_dWx
-  )
-  dnext_c_dWh = (
-      dnext_c_df * df_dWh +
-      dnext_c_di * di_dWh +
-      dnext_c_dg * dg_dWh
-  )
-  dnext_c_db = (
-      dnext_c_df * df_db +
-      dnext_c_di * di_db +
-      dnext_c_dg * dg_db
-  )
-
-  # compute gradients over next_h
-  dnext_h_dx = dnext_h_do * do_dx
-  dnext_h_dprev_h = dnext_h_do * do_dprev_h
-  dnext_h_dprev_c = dnext_h_dnext_c * dnext_c_dprev_c
-  dnext_h_dWx = dnext_h_do * do_dWx
-  dnext_h_dWh = dnext_h_do * do_dWh
-  dnext_h_db = dnext_h_do * do_db
-  dnext_h_dx += dnext_h_dnext_c * dnext_c_dx
-  dnext_h_dprev_h += dnext_h_dnext_c * dnext_c_dprev_h
-  dnext_h_dWx += dnext_h_dnext_c * dnext_c_dWx
-  dnext_h_dWh += dnext_h_dnext_c * dnext_c_dWh
-  dnext_h_db = dnext_h_dnext_c * dnext_c_db
-
-  # compute final gradients
-  dx = dnext_c * dnext_c_dx + dnext_h * dnext_h_dx
-  dprev_c = dnext_c * dnext_c_dprev_c + dnext_h * dnext_h_dprev_c
-  dprev_h = dnext_c * dnext_c_dprev_h + dnext_h * dnext_h_dprev_h
-  dWx = dnext_c * dnext_c_dWx + dnext_h * dnext_h_dWx
-  dWh = dnext_c * dnext_c_dWh + dnext_h * dnext_h_dWh
-  db = dnext_c * dnext_c_db + dnext_h * dnext_h_db
-
-
+  dx = dxh.dot(Wx.T)
+  dWx = x.T.dot(dxh)
+  dprev_h = dhh.dot(Wh.T)
+  dWh = prev_h.T.dot(dhh)
   ##############################################################################
   #                               END OF YOUR CODE                             #
   ##############################################################################
@@ -519,12 +440,26 @@ def lstm_forward(x, h0, Wx, Wh, b):
   - h: Hidden states for all timesteps of all sequences, of shape (N, T, H)
   - cache: Values needed for the backward pass.
   """
+  N, T, D = x.shape
+  _, H = h0.shape
+  D, _ = Wx.shape
+
   h, cache = None, None
+  h = np.zeros((N, T, H))
+  c = np.zeros((N, T, H))
   #############################################################################
   # TODO: Implement the forward pass for an LSTM over an entire timeseries.   #
   # You should use the lstm_step_forward function that you just defined.      #
   #############################################################################
-  pass
+  h_t = h0
+  c_t = c0 = np.zeros((N, H))
+  caches = []
+  for t in xrange(T):
+      h_t, c_t, cache = lstm_step_forward(x[:, t, :], h_t, c_t, Wx, Wh, b)
+      h[:, t, :] = h_t
+      c[:, t, :] = c_t
+      caches.append(cache)
+  cache = x, h0, c0, Wx, Wh, b, h, c, caches
   ##############################################################################
   #                               END OF YOUR CODE                             #
   ##############################################################################
@@ -548,11 +483,46 @@ def lstm_backward(dh, cache):
   - db: Gradient of biases, of shape (4H,)
   """
   dx, dh0, dWx, dWh, db = None, None, None, None, None
+
+  x, h0, c0, Wx, Wh, b, h, c, caches = cache
+
+  N, T, D = x.shape
+  _, H = h0.shape
+
+  dx = np.zeros((N, T, D))
+  dh0 = np.zeros((N, H))
+  dWx = np.zeros((D, 4 * H))
+  dWh = np.zeros((H, 4 * H))
+  db = np.zeros(4 * H)
+
   #############################################################################
   # TODO: Implement the backward pass for an LSTM over an entire timeseries.  #
   # You should use the lstm_step_backward function that you just defined.     #
   #############################################################################
-  pass
+  dh_t_prev = np.zeros((N, H))
+  dc_t_prev = np.zeros((N, H))
+  for t in reversed(xrange(T)):
+      # Prepare dh, x, h, h_prev and cache of step t. Note that h's actual 
+      # gradient dh is sum of given upstream gradient and gradient from 
+      # a step further.
+      dh_t = dh[:, t, :] + dh_t_prev
+      dc_t = dc_t_prev
+      cache_t = caches.pop()
+
+      # Run backpropagation for a single step
+      dx_t, dh_t_prev, dc_t_prev, dWx_t, dWh_t, db_t = \
+          lstm_step_backward(dh_t, dc_t, cache_t)
+
+      # Set gradient of x_t
+      dx[:, t, :] = dx_t
+
+      # Accumulate gradients on Wx, Wh and b along with t
+      dWx += dWx_t
+      dWh += dWh_t
+      db += db_t
+
+  # Gradient of h0
+  dh0 = dh_t_prev
   ##############################################################################
   #                               END OF YOUR CODE                             #
   ##############################################################################

@@ -96,6 +96,10 @@ class CaptioningRNN(object):
     # token, and the first element of captions_out will be the first word.
     captions_in = captions[:, :-1]
     captions_out = captions[:, 1:]
+
+    # Determine which kind of network to use.
+    cell_forward = rnn_forward if self.cell_type == 'rnn' else lstm_forward
+    cell_backward = rnn_backward if self.cell_type == 'rnn' else lstm_backward
     
     # You'll need this 
     mask = (captions_out != self._null)
@@ -151,7 +155,7 @@ class CaptioningRNN(object):
         word_embedding_forward(captions_out, W_embed)
 
     # Initial Hidden State + Captions Input -> Hidden States
-    h, cache['h'] = rnn_forward(captions_vec_in, h0, Wx, Wh, b)
+    h, cache['h'] = cell_forward(captions_vec_in, h0, Wx, Wh, b)
 
     # Hidden States -> Vocabulary Scores
     scores, cache['scores'] = temporal_affine_forward(h, W_vocab, b_vocab)
@@ -167,9 +171,9 @@ class CaptioningRNN(object):
     dh, grads['W_vocab'], grads['b_vocab'] = \
         temporal_affine_backward(dscores, cache['scores'])
 
-    # Backpropagation - RNN
+    # Backpropagation - RNN / LSTM
     dcaptions_vec_in, dh0, grads['Wx'], grads['Wh'], grads['b'] = \
-        rnn_backward(dh, cache['h'])
+        cell_backward(dh, cache['h'])
 
     # Backpropagation - Word Embedding
     grads['W_embed'] = \
@@ -243,6 +247,7 @@ class CaptioningRNN(object):
 
     # Features -> Initial Hidden State
     h_t = features.dot(W_proj) + b_proj
+    c_t = np.zeros_like(h_t)
     x_t = self._start * np.ones((N, 1), dtype=np.int32)
     captions[:, 0] = self._start
     for t in xrange(1, max_length):
@@ -251,7 +256,12 @@ class CaptioningRNN(object):
         word_embedded = np.squeeze(word_embedded)
 
         # Previous Hidden State + Word Vector -> New Hidden State
-        h_t, _ = rnn_step_forward(word_embedded, h_t, Wx, Wh, b)
+        if self.cell_type == 'rnn':
+            h_t, _ = rnn_step_forward(word_embedded, h_t, Wx, Wh, b)
+        else:
+            h_t, c_t, _ = lstm_step_forward(
+                word_embedded, h_t, c_t, Wx, Wh, b
+            )
 
         # Hidden State -> Vocabulary Scores
         scores, _ = temporal_affine_forward(
